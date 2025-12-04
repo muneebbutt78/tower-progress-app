@@ -22,7 +22,7 @@ st.markdown(
 <head>
     <meta property="og:title" content="I-TOWER LCRG Progress Dashboard" />
     <meta property="og:description" content="Live Construction Progress – Lake City Roof Gardens" />
-    <meta property="og:image" content="https://raw.githubusercontent.com/Muneebbutt78/tower-progress-app/main/whatsapp_banner.png" />
+    <meta property="og:image" content="https://raw.githubusercontent.com/Muneebbutt78/tower-progress-app/main/whatsapp_banner.png?v=3" />
     <meta property="og:url" content="https://tower-progress-app-cazgj3dwlu4qufudesz7af.streamlit.app/" />
     <meta property="og:type" content="website" />
 </head>
