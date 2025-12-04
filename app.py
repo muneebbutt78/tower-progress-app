@@ -7,19 +7,27 @@ from zipfile import ZipFile
 from PIL import Image
 import re
 
+# ---------- ICON & PAGE CONFIG ----------
 icon = Image.open("favicon.png")
 
 st.set_page_config(
-    page_title="I-Tower LCRG",
+    page_title="I-Tower LCRG Progress Dashboard",
     page_icon=icon,
-    layout="wide"
+    layout="wide",
 )
 
-# Try to import reportlab for PDF
+# ---------- OPEN GRAPH (WHATSAPP / SOCIAL PREVIEW) ----------
+st.markdown("""
+    <meta property="og:title" content="I-TOWER LCRG Progress" />
+    <meta property="og:description" content="Live Construction Progress – I Tower (LCRG)" />
+    <meta property="og:image" content="https://raw.githubusercontent.com/Muneebbutt78/tower-progress-app/main/favicon.png" />
+    <meta property="og:type" content="website" />
+""", unsafe_allow_html=True)
+
+# ---------- PDF REPORTLIB ----------
 try:
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
-
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
@@ -54,56 +62,46 @@ WEIGHTS = {
     "MEP Fixtures": 0.05,
     "MS Work": 0.02,
     "External Plaster": 0.03,
-    "External Travertine": 0.01,  # updated
+    "External Travertine": 0.01,
     "External Paint": 0.03,
-    "Cleaning": 0.01,              # updated
+    "Cleaning": 0.01,
 }
 
 PDF_TITLE = "Apartment Progress Report ( I Tower)– Lake City Roof Gardens"
 PDF_FOOTER = "Prepared by Muneeb Shehzad Butt – Project Manager"
 
-st.set_page_config(
-    page_title="I-Tower Progress Dashboard",
-    page_icon="🏗️",
-    layout="wide",
-)
-
 BASE_DIR = Path(__file__).parent
 LAKECITY_LOGO = BASE_DIR / "assets" / "lakecity_logo.png"
 UNISON_LOGO = BASE_DIR / "assets" / "unison_logo.png"
 
+# ------------------------------------------------------------
+# ---------------------- UTILITIES ---------------------------
+# ------------------------------------------------------------
 
-# ----------------- UTILITIES -----------------
 def clamp01(x: float) -> float:
     return max(0.0, min(float(x), 1.0))
 
-
 def compute_overall(row_like: pd.Series) -> float:
-    """Weighted overall progress from a row of activities (0–1)."""
     return sum(row_like[col] * WEIGHTS[col] for col in ACTIVITY_COLS)
 
-
 def compute_overall_from_means(means: pd.Series) -> float:
-    """Weighted overall progress from mean activity series (0–1)."""
     return sum(means[col] * WEIGHTS[col] for col in ACTIVITY_COLS)
 
-
 def color_progress(val):
-    """Return background-color style based on percentage value."""
     if pd.isna(val):
         return ""
     if val < 40:
-        return "background-color: #ffcccc"   # light red
+        return "background-color: #ffcccc"
     elif val < 70:
-        return "background-color: #fff7b3"   # light yellow
+        return "background-color: #fff7b3"
     else:
-        return "background-color: #ccffcc"   # light green
+        return "background-color: #ccffcc"
 
 
 # ---------- PDF Generators (no Vs columns, no icons) ----------
+# Apartment PDF
 def make_pdf_apartment(apt_no, floor_value, apt_overall, floor_overall,
                        tower_overall, table_df: pd.DataFrame) -> bytes:
-    """Generate PDF report for Apartment View."""
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
@@ -111,11 +109,9 @@ def make_pdf_apartment(apt_no, floor_value, apt_overall, floor_overall,
     y = height - 50
     c.setFont("Helvetica-Bold", 14)
     c.drawString(40, y, PDF_TITLE)
-
     y -= 30
     c.setFont("Helvetica", 11)
     c.drawString(40, y, f"View: Apartment #{apt_no} (Floor {floor_value})")
-
     y -= 20
     c.setFont("Helvetica", 10)
     c.drawString(40, y, f"Apartment Total Progress: {apt_overall * 100:.1f}%")
@@ -128,7 +124,6 @@ def make_pdf_apartment(apt_no, floor_value, apt_overall, floor_overall,
     c.setFont("Helvetica-Bold", 10)
     c.drawString(40, y, "Activity-wise Comparison (Apartment / Floor / I-Tower)")
 
-    # Table header
     y -= 20
     c.setFont("Helvetica-Bold", 9)
     c.drawString(40, y, "Activity")
@@ -136,11 +131,10 @@ def make_pdf_apartment(apt_no, floor_value, apt_overall, floor_overall,
     c.drawString(270, y, "Floor %")
     c.drawString(340, y, "Tower %")
 
-    # Table rows
     c.setFont("Helvetica", 9)
     y -= 15
     for _, r in table_df.iterrows():
-        if y < 60:  # new page
+        if y < 60:
             c.showPage()
             y = height - 50
             c.setFont("Helvetica-Bold", 10)
@@ -160,7 +154,6 @@ def make_pdf_apartment(apt_no, floor_value, apt_overall, floor_overall,
         c.drawString(340, y, f"{r['I-Tower Progress (%)']:.1f}")
         y -= 14
 
-    # Footer
     c.setFont("Helvetica-Oblique", 8)
     c.drawString(40, 35, PDF_FOOTER)
 
