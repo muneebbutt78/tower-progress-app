@@ -7,6 +7,14 @@ from zipfile import ZipFile
 from PIL import Image
 import re
 
+icon = Image.open("favicon.png")
+
+st.set_page_config(
+    page_title="I-Tower LCRG",
+    page_icon=icon,
+    layout="wide"
+)
+
 # Try to import reportlab for PDF
 try:
     from reportlab.lib.pagesizes import A4
