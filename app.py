@@ -60,17 +60,17 @@ ACTIVITY_COLS = [
 
 # Weights (sum = 1.0)
 WEIGHTS = {
-    "MEP Work": 0.10,
+    "MEP Work": 0.12,
     "Ceiling": 0.15,
-    "Tile Work": 0.20,
+    "Tile Work": 0.22,
     "Paint Work": 0.10,
     "Aluminum Work": 0.10,
     "Wood Work": 0.20,
     "MEP Fixtures": 0.05,
     "MS Work": 0.02,
-    "External Plaster": 0.03,
+    "External Plaster": 0.01,
     "External Travertine": 0.01,
-    "External Paint": 0.03,
+    "External Paint": 0.01,
     "Cleaning": 0.01,
 }
 
