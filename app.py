@@ -19,6 +19,19 @@ from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
 from datetime import datetime, timedelta
 
+PREVIEW_CARD = os.path.join("assets", "preview_card.png")
+
+if os.path.exists(PREVIEW_CARD):
+    st.image(PREVIEW_CARD, width=400)  # smaller, clean size
+else:
+    st.warning("⚠️ Preview card missing: assets/preview_card.png")
+    
+st.set_page_config(
+    page_title="I TOWER LCRG Progress",
+    layout="wide",
+)
+
+
 def show_full_width_table(df):
     """Render dataframe with all columns visible"""
     st.dataframe(
@@ -34,8 +47,6 @@ def show_full_width_table(df):
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-UNISON_LOGO = os.path.join(BASE_DIR, "assets", "unison_logo.png")
-LAKECITY_LOGO = os.path.join(BASE_DIR, "assets", "lakecity_logo.png")
 
 
 def get_previous_friday():
@@ -51,36 +62,20 @@ def get_previous_friday():
 
     last_friday = today - timedelta(days=days_since_friday)
     return last_friday.strftime("%d %B %Y")
+
 def render_global_header():
-    col1, col2, col3 = st.columns([2, 6, 2])
-
-    with col1:
-        if os.path.exists(LAKECITY_LOGO):
-            st.image(LAKECITY_LOGO, width=160)
-
-    with col2:
-        st.markdown(
-            f"""
-            <div style="text-align:center;">
-                <h2 style="margin-bottom:0;">Lake City Roof Gardens</h2>
-                <p style="margin-top:4px; font-size:14px;">
-                    Progress Dashboard | <b>Report Date:</b> {get_previous_friday()}
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    with col3:
-        if os.path.exists(UNISON_LOGO):
-            st.image(UNISON_LOGO, width=130)
-
+    st.markdown(
+        f"""
+        <div style="text-align:center; padding-top:10px;">
+            <h2 style="margin-bottom:0;">Lake City Roof Gardens</h2>
+            <p style="margin-top:4px; font-size:14px; color:#666;">
+                Progress Dashboard | <b>Report Date:</b> {get_previous_friday()}
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     st.markdown("---")
-
-
-
-
-
 
 # --------------------------- PDF SUPPORT --------------------------
 try:
@@ -94,7 +89,7 @@ except ImportError:
 # --------------------------- STREAMLIT CONFIG ----------------------
 st.set_page_config(
     page_title="All Tower Progress Dashboard – Lake City Roof Gardens",
-    page_icon="📊",
+    page_icon="docs/favicon.ico",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -113,7 +108,7 @@ SHEET_RT  = "Roof top"
 SHEET_GF  = "Ground Floor"
 SHEET_CA  = "Common Area"
 
-PHOTO_DIR = r"E:\All_tower_app\uploaded_photos"
+PHOTO_DIR = os.path.join(BASE_DIR, "uploaded_photos")
 os.makedirs(PHOTO_DIR, exist_ok=True)
 
 # Activity columns for apartment progress
@@ -644,7 +639,7 @@ st.sidebar.markdown("---")
 
 st.sidebar.markdown(
     """
-    <a href="https://wa.me/?text=🏗️%20All%20Tower%20Progress%20Dashboard%20-%20Lake%20City%20Roof%20Gardens%0A%0ALive%20Tower,%20Floor%20%26%20Apartment-wise%20Progress%20Monitoring%0Ahttps://alltowerapp-x3ees3svpm6xchmrsqe3hc.streamlit.app/"
+    <a href="https://wa.me/?text=🏗️%20All%20Tower%20Progress%20Dashboard%20-%20Lake%20City%20Roof%20Gardens%0A%0ALive%20Tower,%20Floor%20%26%20Apartment-wise%20Progress%0Ahttps://alltowerapp-x3ees3svpm6xchmrsqe3hc.streamlit.app/?v=2025_01"
        target="_blank"
        style="text-decoration:none;">
        <button style="
