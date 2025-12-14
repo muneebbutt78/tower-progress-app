@@ -19,16 +19,15 @@ from reportlab.platypus import Table, TableStyle
 from reportlab.lib import colors
 from datetime import datetime, timedelta
 
-PREVIEW_CARD = os.path.join("assets", "preview_card.png")
 
-if os.path.exists(PREVIEW_CARD):
-    st.image(PREVIEW_CARD, width=400)  # smaller, clean size
-else:
-    st.warning("⚠️ Preview card missing: assets/preview_card.png")
-    
 st.set_page_config(
     page_title="I TOWER LCRG Progress",
     layout="wide",
+)
+
+st.image(
+    "assets/preview_card.png",
+    use_container_width=True
 )
 
 
