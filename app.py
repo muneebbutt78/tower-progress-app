@@ -39,8 +39,8 @@ def show_full_width_table(df):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ---------------- LOGO PATHS ----------------
-LAKECITY_LOGO = os.path.join(BASE_DIR, "docs", "lakecity_logo.png")
-UNISON_LOGO   = os.path.join(BASE_DIR, "docs", "unison_logo.png")
+LAKECITY_LOGO = os.path.join(BASE_DIR, "assets", "lakecity_logo.png")
+UNISON_LOGO   = os.path.join(BASE_DIR, "assets", "unison_logo.png")
 
 
 
