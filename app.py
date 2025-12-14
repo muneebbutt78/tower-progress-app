@@ -62,16 +62,57 @@ def get_previous_friday():
 def render_global_header():
     st.markdown(
         f"""
-        <div style="text-align:center; padding-top:10px;">
-            <h2 style="margin-bottom:0;">Lake City Roof Gardens</h2>
-            <p style="margin-top:4px; font-size:14px; color:#666;">
-                Progress Dashboard | <b>Report Date:</b> {get_previous_friday()}
-            </p>
+        <style>
+            .header-container {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-top: 10px;
+                margin-bottom: 5px;
+            }}
+            .header-logo {{
+                height: 55px;
+            }}
+            .header-center {{
+                text-align: center;
+                flex: 1;
+            }}
+            .header-title {{
+                margin: 0;
+                font-size: 26px;
+                font-weight: 700;
+            }}
+            .header-sub {{
+                margin: 0;
+                font-size: 14px;
+                color: #666;
+            }}
+        </style>
+
+        <div class="header-container">
+            <!-- LEFT LOGO -->
+            <div>
+                <img src="file:///{UNISON_LOGO}" class="header-logo">
+            </div>
+
+            <!-- CENTER TEXT -->
+            <div class="header-center">
+                <p class="header-title">Lake City Roof Gardens</p>
+                <p class="header-sub">
+                    Progress Dashboard | <b>Report Date:</b> {get_previous_friday()}
+                </p>
+            </div>
+
+            <!-- RIGHT LOGO -->
+            <div>
+                <img src="file:///{LAKECITY_LOGO}" class="header-logo">
+            </div>
         </div>
+
+        <hr>
         """,
         unsafe_allow_html=True
     )
-    st.markdown("---")
 
 # --------------------------- PDF SUPPORT --------------------------
 try:
