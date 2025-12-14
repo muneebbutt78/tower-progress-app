@@ -99,6 +99,18 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# =============================================================
+# PREVIEW CARD (controls Streamlit / WhatsApp preview snapshot)
+# Put your banner here: assets/preview_card.png
+# =============================================================
+PREVIEW_CARD_PATH = os.path.join("assets", "preview_card.png")
+if os.path.exists(PREVIEW_CARD_PATH):
+    st.image(PREVIEW_CARD_PATH, use_container_width=True)
+else:
+    # Keep silent in production if you prefer:
+    st.info("Add assets/preview_card.png to control the WhatsApp/Streamlit preview image.", icon="🖼️")
+
+
 render_global_header()
 
 
