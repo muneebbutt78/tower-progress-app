@@ -60,59 +60,34 @@ def get_previous_friday():
     return last_friday.strftime("%d %B %Y")
 
 def render_global_header():
-    st.markdown(
-        f"""
-        <style>
-            .header-container {{
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                margin-top: 10px;
-                margin-bottom: 5px;
-            }}
-            .header-logo {{
-                height: 55px;
-            }}
-            .header-center {{
-                text-align: center;
-                flex: 1;
-            }}
-            .header-title {{
-                margin: 0;
-                font-size: 26px;
-                font-weight: 700;
-            }}
-            .header-sub {{
-                margin: 0;
-                font-size: 14px;
-                color: #666;
-            }}
-        </style>
+    col1, col2, col3 = st.columns([1.2, 4, 1.2])
 
-        <div class="header-container">
-            <!-- LEFT LOGO -->
-            <div>
-                <img src="file:///{UNISON_LOGO}" class="header-logo">
-            </div>
+    with col1:
+        st.image(
+            "assets/unison_logo.png",
+            width=120
+        )
 
-            <!-- CENTER TEXT -->
-            <div class="header-center">
-                <p class="header-title">Lake City Roof Gardens</p>
-                <p class="header-sub">
+    with col2:
+        st.markdown(
+            f"""
+            <div style="text-align:center;">
+                <h2 style="margin-bottom:0;">Lake City Roof Gardens</h2>
+                <p style="margin-top:4px; font-size:14px; color:#666;">
                     Progress Dashboard | <b>Report Date:</b> {get_previous_friday()}
                 </p>
             </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-            <!-- RIGHT LOGO -->
-            <div>
-                <img src="file:///{LAKECITY_LOGO}" class="header-logo">
-            </div>
-        </div>
+    with col3:
+        st.image(
+            "assets/lakecity_logo.png",
+            width=120
+        )
 
-        <hr>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown("---")
 
 # --------------------------- PDF SUPPORT --------------------------
 try:
