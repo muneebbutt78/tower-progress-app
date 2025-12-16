@@ -462,7 +462,7 @@ def generate_section_pdf(title, tower, progress_text, table_df, photo_path=None)
 
         # ----- Draw table -----
         tbl.wrapOn(c, width, height)
-        tbl_height = len(table_data) * 18
+        tbl_height = len(table_data) * 16
 
         # Draw table BELOW the section heading
         tbl.drawOn(c, 40, y - tbl_height)
@@ -471,19 +471,34 @@ def generate_section_pdf(title, tower, progress_text, table_df, photo_path=None)
         y = y - tbl_height - 30
 
 
-    # ----- Photo -----
+    # ==================================================
+    # PAGE 2 — SITE PROGRESS PHOTOS
+    # ==================================================
+    c.showPage()
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(x_margin, 800, "Site Progress Photos")
+
     if photo_path:
         try:
-            img = ImageReader(photo_path)
-            c.drawImage(img, 40, 40, width=240, preserveAspectRatio=True)
+            img = Image.open(photo_path)
+            img.thumbnail((500, 500))
+            img_reader = ImageReader(img)
+
+            c.drawImage(
+                img_reader,
+                x_margin,
+                250,
+                width=400,
+                preserveAspectRatio=True
+            )
         except:
             pass
 
+    # SAVE ONLY AT END
     c.save()
-    buffer.seek(0)
-    return buffer
 
-
+    
 
 # =============================================================
 #  PDF GENERATION FUNCTION — ADDED BACK
@@ -513,40 +528,77 @@ def generate_apartment_pdf(row, floor_overall, tower_overall, table_df, photo_pa
         c.drawString(x_margin, y_start - 150, f"Floor Progress: {floor_overall:.2f}%")
         c.drawString(x_margin, y_start - 170, f"Tower Progress: {tower_overall:.2f}%")
 
-        if photo_path:
+        
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(x_margin, y_start - 200, "Activity Progress")
+
+        # ---- Build table data ----
+        table_data = [
+            ["Activity", "Apartment %", "Floor %", "Tower %"]
+        ]
+
+        for _, r in table_df.iterrows():
+            table_data.append([
+                r["Activity"],
+                f"{r['Apt %']:.2f}%",
+                f"{r['Floor %']:.2f}%",
+                f"{r['Tower %']:.2f}%"
+            ])
+
+        # ---- Create table ----
+        tbl = Table(
+            table_data,
+            colWidths=[180, 110, 110, 110]
+        )
+
+        tbl.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+
+        # ---- Draw table ----
+        table_y = y_start - 300
+        tbl.wrapOn(c, 500, 700)
+        tbl.drawOn(c, x_margin, table_y - (len(table_data) * 16))
+
+        # ==================================================
+        # PAGE 2 — APARTMENT SITE PHOTOS
+        # ==================================================
+        c.showPage()
+
+        x_margin = 40  # define margin explicitly
+
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(x_margin, 800, "Apartment Site Progress Photos")
+
+        if photo_path and os.path.exists(photo_path):
             try:
                 img = Image.open(photo_path)
-                img.thumbnail((350, 350))
+                img.thumbnail((500, 500))
                 img_reader = ImageReader(img)
-                c.drawImage(img_reader, x_margin, y_start - 500, width=300, height=300)
-            except:
+
+                c.drawImage(
+                    img_reader,
+                    x_margin,
+                    250,
+                    width=400,
+                    preserveAspectRatio=True,
+                    mask="auto"
+                )
+            except Exception:
                 pass
 
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(x_margin, y_start - 540, "Activity Progress")
-
-        c.setFont("Helvetica", 10)
-        table_y = y_start - 560
-
-        for idx, row_data in table_df.iterrows():
-            act = row_data["Activity"]
-            aptv = f"{row_data['Apt %']:.2f}"
-            flv  = f"{row_data['Floor %']:.2f}"
-            twv  = f"{row_data['Tower %']:.2f}"
-
-            c.drawString(
-                x_margin, table_y,
-                f"{act:30} Apt:{aptv}%  Floor:{flv}%  Tower:{twv}%"
-            )
-
-            table_y -= 14
-            if table_y < 80:
-                c.showPage()
-                c.setFont("Helvetica", 10)
-                table_y = 800
-
-        c.showPage()
+        # -------- SAVE ONLY ONCE AT END --------
+            # -------- SAVE ONLY ONCE AT END --------
         c.save()
+
         pdf_data = buffer.getvalue()
         buffer.close()
         return pdf_data
@@ -554,6 +606,9 @@ def generate_apartment_pdf(row, floor_overall, tower_overall, table_df, photo_pa
     except Exception as e:
         st.error(f"PDF generation error: {e}")
         return None
+
+
+
 # =============================================================
 # INITIALIZE PHOTO DIRECTORY STRUCTURE (ONE-TIME SAFE)
 # =============================================================
