@@ -11,15 +11,14 @@ import zipfile
 from io import BytesIO
 import re  # for parsing tower names
 import numpy as np
-from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from io import BytesIO
-from reportlab.platypus import Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from tempfile import NamedTemporaryFile
 from reportlab.lib import colors
 from datetime import datetime, timedelta
-
-PREVIEW_CARD = os.path.join("assets", "preview_card.png")
 
 
 
@@ -37,11 +36,25 @@ def show_full_width_table(df):
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ---------------- LOGO PATHS ----------------
+# ================== PDF LOGO PATHS (REQUIRED) ==================
 LAKECITY_LOGO = os.path.join(BASE_DIR, "assets", "lakecity_logo.png")
 UNISON_LOGO   = os.path.join(BASE_DIR, "assets", "unison_logo.png")
 
+
+# ================== FILE PATHS ==================
+EXCEL_FILE = "Apartment_Progress_Weighted-Progress_App_ITowerAvg_AppView_v5.xlsx"
+CASHFLOW_FILE = "2111-UNI-LCRG-Projected Cash Flow 14.12.2025 -.xlsx"
+CASHFLOW_SHEET = 0
+
+# ================== DOCUMENTATION FILES ==================
+SITE_DOC_FILE = "IR Logs.xlsx"
+PROJECT_DOC_FILE = "Project_Documentation_Register_LCRG.xlsx"
+
+# 🔗 SharePoint – Master Project Repository
+SHAREPOINT_DOC_URL = (
+    "https://unisonservices.sharepoint.com/projects/"
+    "CurrentProjects/2111/default.aspx"
+)
 
 
 
@@ -58,6 +71,9 @@ def get_previous_friday():
 
     last_friday = today - timedelta(days=days_since_friday)
     return last_friday.strftime("%d %B %Y")
+
+# ---------------- ACCESS CONTROL ----------------
+
 
 def render_global_header():
     col1, col2, col3 = st.columns([1.2, 4, 1.2])
@@ -112,6 +128,11 @@ render_global_header()
 
 # --------------------------- CONSTANTS -----------------------------
 EXCEL_FILE = "Apartment_Progress_Weighted-Progress_App_ITowerAvg_AppView_v5.xlsx"
+# ---------------- CASH FLOW CONFIG ----------------
+CASHFLOW_FILE = "2111-UNI-LCRG-Projected Cash Flow 14.12.2025 -.xlsx"
+CASHFLOW_SHEET = 0   # use 0 for first sheet (safe)
+
+
 
 SHEET_LCRG = "LCRG Progress"
 SHEET_APT = "Apartment Progress"
@@ -171,7 +192,6 @@ def style_progress_table(df):
     )
 
 
-
 def compute_overall(row):
     return float(sum(row.get(col, 0) * WEIGHTS[col] for col in ACTIVITY_COLS)) * 100
 
@@ -210,6 +230,103 @@ def ensure_apt_folder_from_zip(key):
                 pass
             break
     return apt_dir
+
+def clean_currency(col):
+    if not isinstance(col, pd.Series):
+        return col
+
+    return (
+        col.astype(str)
+        .str.replace(",", "", regex=False)
+        .str.replace("Rs.", "", regex=False)
+        .str.strip()
+        .pipe(pd.to_numeric, errors="coerce")
+        .fillna(0)
+    )
+
+
+def highlight_groups(row):
+    area = str(row.get("Area", "")).strip()
+    if area == "Finishes":
+        return ["background-color:#e6e6e6; font-weight:700; font-size:15px;"] * len(row)
+    return [""] * len(row)
+
+def format_cash(val):
+    try:
+        val = float(val)
+    except:
+        return ""
+    return f"{val:,.0f}" if val != 0 else ""
+
+
+
+def normalize_cashflow_columns(df):
+    col_map = {}
+
+    for col in df.columns:
+        if not isinstance(col, str):
+            continue
+
+        c = col.strip().lower()
+
+        if "area" in c or "particular" in c or "description" in c:
+            col_map[col] = "Area"
+
+        elif "s.no" in c or "sno" in c:
+            col_map[col] = "S.No"
+
+        # 🔹 NEW: Consultant Budget (Column E)
+        elif "consultant" in c or "nada" in c or "sems" in c:
+            col_map[col] = "Consultant Budget"
+
+        # 🔹 Existing: Initial Quotation Budget (Column F)
+        elif "budget" in c or "quotation" in c:
+            col_map[col] = "First Quotation Recived"
+
+        elif "award" in c:
+            col_map[col] = "Awarded Valuue"
+
+        elif "actual" in c and "spend" in c:
+            col_map[col] = "Actual Spending"
+
+        elif "balance" in c:
+            col_map[col] = "Actual Balance Amount"
+
+        elif "pending" in c:
+            col_map[col] = "Pending approval"
+
+    return df.rename(columns=col_map)
+
+
+    return df.rename(columns=col_map)
+
+def standardize_columns(df):
+    col_map = {}
+    for col in df.columns:
+        c = str(col).lower().strip()
+        if "area" in c or "particular" in c or "description" in c or "item" in c:
+            col_map[col] = "Area"
+        elif "s.no" in c or "sno" in c:
+            col_map[col] = "S.No"
+        elif "quotation" in c or "budget" in c:
+            col_map[col] = "First Quotation Recived"
+        elif "award" in c:
+            col_map[col] = "Awarded Valuue"
+        elif "spending" in c:
+            col_map[col] = "Actual Spending"
+        elif "balance" in c:
+            col_map[col] = "Actual Balance Amount"
+        elif "pending" in c:
+            col_map[col] = "Pending approval"
+
+    df = df.rename(columns=col_map)
+
+    # 🔒 FORCE Area column if still missing
+    if "Area" not in df.columns:
+        df.insert(0, "Area", "")
+
+    return df
+
 
 def save_photos(tower, apartment_no, files):
     key = make_photo_key(tower, apartment_no)
@@ -268,6 +385,385 @@ def show_photos(tower, apt_no):
         except:
             continue
         (col1 if i % 2 == 0 else col2).image(img, caption=os.path.basename(path))
+def make_columns_unique(df):
+    cols = []
+    seen = {}
+
+    for c in df.columns:
+        if c not in seen:
+            seen[c] = 0
+            cols.append(c)
+        else:
+            seen[c] += 1
+            cols.append(f"{c}_{seen[c]}")
+
+    df.columns = cols
+    return df
+
+def export_finishes_pdf(df, file_path):
+    doc = SimpleDocTemplate(
+        file_path,
+        pagesize=landscape(A4),
+        rightMargin=30,
+        leftMargin=30,
+        topMargin=30,
+        bottomMargin=30
+    )
+
+    elements = []
+
+    # ---------- Build table data ----------
+    table_data = [df.columns.tolist()]
+    for _, row in df.iterrows():
+        table_data.append([
+            format_cash(row[c]) if c not in ["S.No", "Area"] else row[c]
+            for c in df.columns
+        ])
+
+    table = Table(table_data, repeatRows=1)
+
+    # ---------- Base table style ----------
+    style = TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (2, 1), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+    ])
+
+    # ---------- Apply row coloring ----------
+    for i, (_, row) in enumerate(df.iterrows(), start=1):
+        row_color = get_finishes_row_color(row)
+        if row_color:
+            style.add("BACKGROUND", (0, i), (-1, i), row_color)
+
+    table.setStyle(style)
+    elements.append(table)
+
+    doc.build(elements)
+
+# ======================================================
+# 🔹 CASH FLOW ROW HIGHLIGHT HELPERS (GLOBAL)
+# ======================================================
+
+def highlight_finishes_rows(row):
+    try:
+        pending = float(row.get("Pending approval", 0))
+    except:
+        return [""] * len(row)
+
+    if pending == 0:
+        return ["background-color:#e6f4ea;"] * len(row)
+    return [""] * len(row)
+
+
+def highlight_summary_rows(row):
+    try:
+        awarded = float(row.get("Awarded Valuue", 0))
+        pending = float(row.get("Pending approval", 0))
+    except:
+        return [""] * len(row)
+
+    area = str(row.get("Area", "")).lower()
+
+    # ❌ Do not color totals
+    if "grand total" in area:
+        return [""] * len(row)
+
+    # 🟢 No pending at all
+    if pending == 0:
+        return ["background-color:#e6f4ea;"] * len(row)
+
+    # 🟠 Awarded + Pending
+    if awarded > 0 and pending > 0:
+        return ["background-color:#fff4e5;"] * len(row)
+
+    # ❌ Only pending (no awarded)
+    return [""] * len(row)
+
+
+def render_cashflow_for_tower(
+    tower_title,
+    summary_sheet,
+    finishes_sheet,
+    checkbox_key,
+    pdf_filename,
+    summary_rows=None,
+    show_finishes=True
+):
+    st.subheader(f"🏢 {tower_title} Cash Flow")
+    st.caption(f"🗓 Cash Flow Status as of {get_previous_friday()}")
+
+
+    try:
+        # ======================================================
+        # 1️⃣ READ SUMMARY
+        # ======================================================
+        raw_summary = pd.read_excel(
+            CASHFLOW_FILE,
+            sheet_name=summary_sheet,
+            header=None
+        )
+
+        header_row = None
+        for i in range(len(raw_summary)):
+            if raw_summary.iloc[i].astype(str).str.lower().str.contains("area").any():
+                header_row = i
+                break
+
+        if header_row is None:
+            st.error(f"Header row not found in {summary_sheet}")
+            return
+
+        df_summary = raw_summary.iloc[header_row + 1:].copy()
+        df_summary.columns = raw_summary.iloc[header_row]
+        df_summary = normalize_cashflow_columns(df_summary)
+        df_summary = make_columns_unique(df_summary)
+        df_summary = force_correct_quotation_column(df_summary)
+
+        for col in ["Consultant Budget", "First Quotation Recived"]:
+            if col not in df_summary.columns:
+                df_summary[col] = 0
+
+        if summary_rows is not None:
+            df_summary = df_summary.iloc[summary_rows].copy()
+
+        # remove empty rows
+        df_summary = df_summary[
+            df_summary["Area"].notna() &
+            (df_summary["Area"].astype(str).str.strip() != "")
+        ].copy()
+
+        # ======================================================
+        # REQUIRED COLUMNS
+        # ======================================================
+        REQUIRED_COLS = [
+            "S.No",
+            "Area",
+            "Consultant Budget",
+            "First Quotation Recived",
+            "Awarded Valuue",
+            "Actual Spending",
+            "Actual Balance Amount",
+            "Pending approval"
+        ]
+
+        df_summary = df_summary[REQUIRED_COLS].copy()
+
+        for c in REQUIRED_COLS[2:]:
+            df_summary[c] = clean_currency(df_summary[c])
+
+        df_summary[REQUIRED_COLS[2:]] = df_summary[REQUIRED_COLS[2:]].fillna(0)
+
+        # ======================================================
+        # KPI — SUMMARY TOTAL
+        # ======================================================
+        total_row = df_summary[
+            df_summary["Area"].astype(str).str.strip().str.lower().eq("grand total")
+        ]
+
+        if not total_row.empty:
+            r = total_row.iloc[0]
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("💼 Total Awarded", f"{r['Awarded Valuue']:,.0f}")
+            c2.metric("💸 Actual Spending", f"{r['Actual Spending']:,.0f}")
+            c3.metric("🧮 Balance", f"{r['Actual Balance Amount']:,.0f}")
+            c4.metric("⏳ Pending Approval", f"{r['Pending approval']:,.0f}")
+
+        st.markdown("---")
+        st.markdown(f"### 🧾 Summary of {tower_title}")
+
+        st.data_editor(
+            df_summary.style
+                .apply(highlight_summary_rows, axis=1)
+                .format(format_cash, subset=REQUIRED_COLS[2:]),
+            use_container_width=True,
+            hide_index=True,
+            disabled=True
+        )
+
+
+        # ======================================================
+        # FINISHES — ONLY FOR TOWERS
+        # ======================================================
+        if show_finishes:
+
+            raw_fin = pd.read_excel(
+                CASHFLOW_FILE,
+                sheet_name=finishes_sheet,
+                header=None
+            )
+
+            header_row = None
+            for i in range(len(raw_fin)):
+                if raw_fin.iloc[i].astype(str).str.lower().str.contains("area").any():
+                    header_row = i
+                    break
+
+            if header_row is None:
+                st.error(f"Header row not found in {finishes_sheet}")
+                return
+
+            df_fin = raw_fin.iloc[header_row + 1:].copy()
+            df_fin.columns = raw_fin.iloc[header_row]
+            df_fin = normalize_cashflow_columns(df_fin)
+            df_fin = make_columns_unique(df_fin)
+            df_fin = force_correct_quotation_column(df_fin)
+
+            for col in ["Consultant Budget", "First Quotation Recived"]:
+                if col not in df_fin.columns:
+                    df_fin[col] = 0
+
+            df_fin = df_fin.iloc[4:85].copy()
+            df_fin = df_fin[REQUIRED_COLS].copy()
+
+            for c in REQUIRED_COLS[2:]:
+                df_fin[c] = clean_currency(df_fin[c])
+
+            df_fin[REQUIRED_COLS[2:]] = df_fin[REQUIRED_COLS[2:]].fillna(0)
+
+            # KPI — FINISHES TOTAL
+            fin_total = df_fin[
+                df_fin["Area"].astype(str).str.strip().str.lower().eq("grand total finishes")
+            ]
+
+            if not fin_total.empty:
+                r = fin_total.iloc[0]
+                f1, f2, f3, f4 = st.columns(4)
+                f1.metric("🧱 Finishes Awarded", f"{r['Awarded Valuue']:,.0f}")
+                f2.metric("💸 Finishes Spending", f"{r['Actual Spending']:,.0f}")
+                f3.metric("🧮 Finishes Balance", f"{r['Actual Balance Amount']:,.0f}")
+                f4.metric("⏳ Finishes Pending", f"{r['Pending approval']:,.0f}")
+
+            st.markdown("---")
+
+            df_fin_view = df_fin[
+                ~df_fin["Area"].astype(str).str.contains(
+                    "sub total|façade|facade",
+                    case=False,
+                    na=False
+                )
+            ].copy()
+
+            show_pending = st.checkbox(
+                "🔍 Show Pending Approval Only (Finishes)",
+                key=checkbox_key
+            )
+
+            if show_pending:
+                df_fin_view = df_fin_view[df_fin_view["Pending approval"] > 0]
+
+            st.markdown(f"### 🧱 Summary of Finishes – {tower_title}")
+
+            st.data_editor(
+                df_fin_view.style
+                    .apply(highlight_finishes_rows, axis=1)
+                    .format(format_cash, subset=REQUIRED_COLS[2:]),
+                use_container_width=True,
+                hide_index=True,
+                disabled=True
+            )
+
+            st.markdown("---")
+
+            if st.button("📄 Export Finishes to PDF", key=f"pdf_{tower_title}"):
+                with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    export_finishes_pdf(df_fin_view, tmp.name)
+                    with open(tmp.name, "rb") as f:
+                        st.download_button(
+                            "⬇️ Download Finishes PDF",
+                            f,
+                            file_name=pdf_filename,
+                            mime="application/pdf"
+                        )
+        # ======================================================
+        # 📄 GROUND FLOOR — FINANCIAL PDF EXPORT
+        # (export SUMMARY table, not finishes)
+        # ======================================================
+
+        if "ground floor" in tower_title.lower():
+
+            st.markdown("---")
+
+            if st.button("📄 Export Ground Floor Financial to PDF", key=f"pdf_gf_{tower_title}"):
+
+                with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    export_finishes_pdf(df_summary, tmp.name)
+
+                    with open(tmp.name, "rb") as f:
+                        st.download_button(
+                            "⬇️ Download Ground Floor Financial PDF",
+                            f,
+                            file_name=f"Ground_Floor_Financial_{tower_title}_{get_previous_friday()}.pdf",
+                            mime="application/pdf"
+                        )
+        # ======================================================
+        # 📄 EXTERNAL DEVELOPMENT — FINANCIAL PDF EXPORT
+        # ======================================================
+
+        if "external" in tower_title.lower():
+
+            st.markdown("---")
+
+            if st.button(
+                "📄 Export External Development Financial PDF",
+                key=f"pdf_ext_fin_{tower_title}"
+            ):
+
+                with NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    export_finishes_pdf(df_summary, tmp.name)
+
+                    with open(tmp.name, "rb") as f:
+                        st.download_button(
+                            "⬇️ Download External Development Financial PDF",
+                            f,
+                            file_name=f"External_Development_Financial_{get_previous_friday()}.pdf",
+                            mime="application/pdf"
+                        )
+           
+
+    except Exception as e:
+        st.error(f"{tower_title} Cash Flow error: {e}")
+
+         
+
+def force_correct_quotation_column(df):
+    """
+    Guarantees presence of 'First Quotation Recived'.
+    Picks the RIGHTMOST matching budget/quotation column.
+    """
+
+    # Find any column that LOOKS like budget / quotation
+    candidates = []
+    for c in df.columns:
+        if not isinstance(c, str):
+            continue
+
+        name = c.lower()
+        if "quotation" in name or "budget" in name:
+            candidates.append(c)
+
+    # ❌ No candidate found → create empty column
+    if not candidates:
+        df["First Quotation Recived"] = 0
+        return df
+
+    # ✅ Pick RIGHTMOST column (Excel F)
+    correct_col = candidates[-1]
+
+    df["First Quotation Recived"] = df[correct_col]
+
+    # Drop duplicates safely
+    drop_cols = [
+        c for c in candidates
+        if c != correct_col and c != "First Quotation Recived"
+    ]
+    df = df.drop(columns=drop_cols, errors="ignore")
+
+    return df
+
+
 # =============================================================
 # GENERIC SECTION PHOTO HELPERS (GF / CA / External)
 # =============================================================
@@ -428,18 +924,69 @@ def generate_section_pdf(title, tower, progress_text, table_df, photo_path=None)
     ]
 
     # Safety check
-    if table_df.empty or not activity_cols:
-        c.setFont("Helvetica", 10)
-        c.drawString(40, y, "No activity data available.")
-    else:
-        row = table_df.iloc[0]
+    # ---------------------------------------------------------
+    # CASE 1: ROW-WISE activity table (APARTMENT PDF)
+    # ---------------------------------------------------------
+    if (
+        "Activity" in table_df.columns
+        and "Progress %" in table_df.columns
+        and not table_df.empty
+    ):
 
-        # ----- Build table data -----
         table_data = [["Activity", "Progress %"]]
+
+        for _, r in table_df.iterrows():
+            table_data.append([
+                str(r["Activity"]),
+                f"{float(r['Progress %']):.2f}%"
+            ])
+
+        tbl = Table(table_data, colWidths=[320, 140])
+
+        tbl.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+
+        tbl.wrapOn(c, width, height)
+        tbl_height = len(table_data) * 18
+        tbl.drawOn(c, 40, y - tbl_height)
+        y = y - tbl_height - 30
+
+    # ---------------------------------------------------------
+    # CASE 2: COLUMN-WISE activity table (ALL OTHER PDFs)
+    # ---------------------------------------------------------
+    elif not table_df.empty and activity_cols:
+
+        row = table_df.iloc[0]
+        table_data = [["Activity", "Progress %"]]
+
         for act in activity_cols:
             val = float(row.get(act, 0))
             display_val = val * 100 if val <= 1 else val
             table_data.append([act, f"{display_val:.2f}%"])
+
+        tbl = Table(table_data, colWidths=[320, 140])
+        tbl.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+
+        tbl.wrapOn(c, width, height)
+        tbl_height = len(table_data) * 18
+        tbl.drawOn(c, 40, y - tbl_height)
+        y = y - tbl_height - 30
+
+    else:
+        c.setFont("Helvetica", 10)
+        c.drawString(40, y, "No activity data available.")
+
 
 
         # ----- Create table -----
@@ -462,7 +1009,7 @@ def generate_section_pdf(title, tower, progress_text, table_df, photo_path=None)
 
         # ----- Draw table -----
         tbl.wrapOn(c, width, height)
-        tbl_height = len(table_data) * 16
+        tbl_height = len(table_data) * 18
 
         # Draw table BELOW the section heading
         tbl.drawOn(c, 40, y - tbl_height)
@@ -471,141 +1018,44 @@ def generate_section_pdf(title, tower, progress_text, table_df, photo_path=None)
         y = y - tbl_height - 30
 
 
-    # ==================================================
-    # PAGE 2 — SITE PROGRESS PHOTOS
-    # ==================================================
-    c.showPage()
-
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(x_margin, 800, "Site Progress Photos")
-
-    if photo_path:
+    
+    # ----- Photo (BELOW TABLE) -----
+    if photo_path and y > 160:
         try:
-            img = Image.open(photo_path)
-            img.thumbnail((500, 500))
-            img_reader = ImageReader(img)
-
+            img = ImageReader(photo_path)
             c.drawImage(
-                img_reader,
-                x_margin,
-                250,
-                width=400,
-                preserveAspectRatio=True
+                img,
+                40,
+                y - 260,
+                width=220,
+                height=260,
+                preserveAspectRatio=True,
+                mask="auto"
             )
         except:
             pass
 
-    # SAVE ONLY AT END
     c.save()
+    buffer.seek(0)
+    return buffer
 
-    
 
-# =============================================================
-#  PDF GENERATION FUNCTION — ADDED BACK
-# =============================================================
-
-def generate_apartment_pdf(row, floor_overall, tower_overall, table_df, photo_path):
-    try:
-        buffer = BytesIO()
-        c = canvas.Canvas(buffer, pagesize=A4)
-
-        x_margin = 50
-        y_start = 800
-
-        c.setFont("Helvetica-Bold", 16)
-        c.drawString(x_margin, y_start, "Apartment Progress Report – Lake City Roof Gardens")
-
-        c.setFont("Helvetica", 12)
-        c.drawString(x_margin, y_start - 30, f"Apartment: {int(row['Apartment No'])}")
-        c.drawString(x_margin, y_start - 50, f"Tower: {row['Tower']}")
-        c.drawString(x_margin, y_start - 70, f"Floor: {int(row['Floor'])}")
-
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(x_margin, y_start - 110, "Overall Progress Summary:")
-
-        c.setFont("Helvetica", 11)
-        c.drawString(x_margin, y_start - 130, f"Apartment Progress: {compute_overall(row):.2f}%")
-        c.drawString(x_margin, y_start - 150, f"Floor Progress: {floor_overall:.2f}%")
-        c.drawString(x_margin, y_start - 170, f"Tower Progress: {tower_overall:.2f}%")
-
-        
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(x_margin, y_start - 200, "Activity Progress")
-
-        # ---- Build table data ----
-        table_data = [
-            ["Activity", "Apartment %", "Floor %", "Tower %"]
-        ]
-
-        for _, r in table_df.iterrows():
-            table_data.append([
-                r["Activity"],
-                f"{r['Apt %']:.2f}%",
-                f"{r['Floor %']:.2f}%",
-                f"{r['Tower %']:.2f}%"
-            ])
-
-        # ---- Create table ----
-        tbl = Table(
-            table_data,
-            colWidths=[180, 110, 110, 110]
-        )
-
-        tbl.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("ALIGN", (1, 1), (-1, -1), "CENTER"),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ]))
-
-        # ---- Draw table ----
-        table_y = y_start - 300
-        tbl.wrapOn(c, 500, 700)
-        tbl.drawOn(c, x_margin, table_y - (len(table_data) * 16))
-
-        # ==================================================
-        # PAGE 2 — APARTMENT SITE PHOTOS
-        # ==================================================
-        c.showPage()
-
-        x_margin = 40  # define margin explicitly
-
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(x_margin, 800, "Apartment Site Progress Photos")
-
-        if photo_path and os.path.exists(photo_path):
-            try:
-                img = Image.open(photo_path)
-                img.thumbnail((500, 500))
-                img_reader = ImageReader(img)
-
-                c.drawImage(
-                    img_reader,
-                    x_margin,
-                    250,
-                    width=400,
-                    preserveAspectRatio=True,
-                    mask="auto"
-                )
-            except Exception:
-                pass
-
-        # -------- SAVE ONLY ONCE AT END --------
-            # -------- SAVE ONLY ONCE AT END --------
-        c.save()
-
-        pdf_data = buffer.getvalue()
-        buffer.close()
-        return pdf_data
-
-    except Exception as e:
-        st.error(f"PDF generation error: {e}")
+def get_finishes_row_color(row):
+    area = str(row.get("Area", "")).strip().lower()
+    if "grand total" in area:
         return None
+
+    try:
+        awarded = float(row.get("Awarded Valuue", 0))
+        pending = float(row.get("Pending approval", 0))
+    except:
+        return None
+
+    if pending == 0:
+        return colors.HexColor("#e6f4ea")
+    if awarded > 0 and pending > 0:
+        return colors.HexColor("#fff4e5")
+    return None
 
 
 
@@ -687,6 +1137,36 @@ tower_list = sorted(df_apt["Tower"].unique())
 floor_list = sorted(df_apt["Floor"].unique())
 apt_list   = sorted(df_apt["Apartment No"].unique())
 
+def load_cashflow():
+    df = pd.read_excel(CASHFLOW_FILE, sheet_name=CASHFLOW_SHEET)
+    df.columns = df.columns.str.strip()
+
+    required_cols = [
+        "S.No",
+        "Area",
+        "First Quotation Recived",
+        "Awarded Valuue",
+        "Actual Spending",
+        "Actual Balance Amount",
+        "Pending approval"
+    ]
+
+    # Keep only required columns
+    df = df[[c for c in required_cols if c in df.columns]]
+
+    return df
+# =============================================================
+# 🔐 ACCESS CONTROL
+# =============================================================
+
+def check_cashflow_access():
+    with st.sidebar.expander("🔐 Restricted Access", expanded=False):
+        pwd = st.text_input("Enter Cash Flow Password", type="password")
+
+    # CHANGE PASSWORD HERE
+    return pwd == "LCRG@2025"
+
+
 # =============================================================
 #  SIDEBAR FILTERS
 # =============================================================
@@ -727,7 +1207,7 @@ st.sidebar.markdown(
 
 
 # Auto-select relevant view
-view_options = [
+VIEW_OPTIONS = [
     "🏁 LCRG Progress",
     "🏙 Tower Summary",
     "🏬 Floor Summary",
@@ -736,16 +1216,14 @@ view_options = [
     "⬆️ Rooftop",
     "🧱 Ground Floor",
     "🏛 Common Area",
-    "📷 Photo Viewer"
-]
+    "📷 Photo Viewer",
+    "💰 Financial",
+    "📂 Documentation"
+    ]
+
 default_view = "🏁 LCRG Progress"
 
-view_mode = st.radio(
-    "Select View",
-    view_options,
-    index=view_options.index(default_view),
-    horizontal=True
-)
+view_mode = st.radio("Select View", VIEW_OPTIONS, horizontal=True)
 # =============================================================
 # 🏁 LCRG OVERALL PROGRESS (LANDING PAGE)
 # =============================================================
@@ -773,10 +1251,29 @@ if view_mode == "🏁 LCRG Progress":
     )
 
     # ---------------------------------------------------------
-    # KPI — OVERALL LCRG
+    # KPI — OVERALL LCRG (LOCKED STRUCTURE)
     # ---------------------------------------------------------
-    overall_val = df[df["Area"].str.contains("LCRG", case=False)]["Progress %"].mean()
+
+    # 🔹 Extract Structure-LCRG
+    Structure_LCRG = df.loc[
+        df["Area"].str.contains("Structure-LCRG", case=False, na=False),
+        "Progress %"
+    ].iloc[0]
+
+    # 🔹 Extract Finishes-LCRG
+    Finishes_LCRG = df.loc[
+        df["Area"].str.contains("Finishes-LCRG", case=False, na=False),
+        "Progress %"
+    ].iloc[0]
+
+    # 🔹 Final LCRG Overall (Structure 40% + Finishes 60%)
+    overall_val = (
+        Structure_LCRG * 0.40 +
+        Finishes_LCRG  * 0.60
+    )*1.05
+
     st.metric("🌍 LCRG Overall Progress", f"{overall_val:.2f}%")
+
 
     # ---------------------------------------------------------
     # COLUMNS STORED AS DECIMALS → CONVERT TO %
@@ -853,7 +1350,7 @@ if view_mode == "🏙 Tower Summary":
 
     # Weighted overall % × 1.09 boost (capped at 100%)
     df_tower["Overall %"] = df_tower.apply(
-        lambda r: min(compute_overall(r) * 1.13, 100),
+        lambda r: min(compute_overall(r) * 1.05, 100),
         axis=1
     )
 
@@ -1072,18 +1569,41 @@ elif view_mode == "🏢 Apartment Progress":
             if files:
                 first_photo_path = files[0]
 
+        # ================= APARTMENT PDF DATA =================
+        apt_pdf_df = pd.DataFrame({
+            "Activity": ACTIVITY_COLS,
+            "Progress %": [
+                float(row[col]) * 100 for col in ACTIVITY_COLS
+            ]
+        })
+
+
         # ---------------- PDF EXPORT ----------------
         st.markdown("---")
         if REPORTLAB_AVAILABLE:
-            pdf_bytes = generate_apartment_pdf(
-                row, floor_overall, tower_overall, table_df, first_photo_path
+            df_pdf = table_df.copy()
+
+            # ensure numeric
+            for c in ["Apt %", "Floor %", "Tower %"]:
+                df_pdf[c] = pd.to_numeric(df_pdf[c], errors="coerce").fillna(0)
+
+            pdf_buffer = generate_section_pdf(
+                title="Apartment Progress Report – Lake City Roof Gardens",
+                tower=f"{tower_name} | Floor {floor_no} | Apartment {apt_no}",
+                progress_text=(
+                    f"Apt {apt_overall:.2f}% | "
+                    f"Floor {floor_overall:.2f}% | "
+                    f"Tower {tower_overall:.2f}%"
+                ),
+                table_df=apt_pdf_df,
+                photo_path=first_photo_path
             )
-            if pdf_bytes is not None:
+            if pdf_buffer is not None:
                 file_key = make_photo_key(tower_name, apt_no)
                 st.download_button(
                     label="📄 Download Apartment PDF Report",
-                    data=pdf_bytes,
-                    file_name=f"{file_key}_report.pdf",
+                    data=pdf_buffer,
+                    file_name=f"Apt_{apt_no}_{tower_name}_Report.pdf",
                     mime="application/pdf"
                 )
         else:
@@ -1844,3 +2364,570 @@ elif view_mode == "📷 Photo Viewer":
                     (col1 if i % 2 == 0 else col2).image(
                         img, caption=os.path.basename(path)
                     )
+
+
+# ================== FINANCIAL TAB ==================
+elif view_mode == "💰 Financial":
+
+    st.header("💰 Financial Dashboard")
+
+    # (Optional) If you have password protection, keep it here:
+    # access_granted = check_cashflow_access()
+    # if not access_granted:
+    #     st.warning("Restricted access. Please enter password to view financial data.")
+    #     st.stop()
+
+    fin_tabs = st.tabs([
+        "📊 Overall Cash Flow",
+        "🏢 I Tower Cash Flow",
+        "🏢 L1 Tower Cash Flow",
+        "🏢 L2 Tower Cash Flow",
+        "🏬 Ground Floor",
+        "🌳 External Development Cash Flow"
+    ])
+
+    # ======================================================
+    # TAB 1 — OVERALL CASH FLOW (YOUR FINAL CASH FLOW CODE)
+    # ======================================================
+    with fin_tabs[0]:
+
+        st.subheader("📊 Overall Cash Flow")
+
+        try:
+            # 1️⃣ Read without headers
+            raw = pd.read_excel(
+                CASHFLOW_FILE,
+                sheet_name=CASHFLOW_SHEET,
+                header=None
+            )
+
+            # 2️⃣ Find header row (row containing 'Area')
+            header_row = None
+            for i in range(len(raw)):
+                row_vals = raw.iloc[i].astype(str).str.lower()
+                if row_vals.str.contains("area").any():
+                    header_row = i
+                    break
+
+            if header_row is None:
+                st.error("Could not detect header row in Cash Flow file.")
+                st.stop()
+
+            # 3️⃣ Promote header
+            df = raw.iloc[header_row + 1:].copy()
+            df.columns = raw.iloc[header_row]
+            df.columns = df.columns.astype(str).str.strip()
+
+            # 4️⃣ Required columns
+            REQUIRED_COLS = [
+                "S.No",
+                "Area",
+                "First Quotation Recived",
+                "Awarded Valuue",
+                "Actual Spending",
+                "Actual Balance Amount",
+                "Pending approval"
+            ]
+
+            # 5️⃣ Auto-map headers (robust)
+            col_map = {}
+            for col in df.columns:
+                c = col.lower().replace(" ", "")
+                if "s.no" in c or "sno" in c:
+                    col_map[col] = "S.No"
+                elif "area" in c:
+                    col_map[col] = "Area"
+                elif "quotation" in c:
+                    col_map[col] = "First Quotation Recived"
+                elif "awarded" in c:
+                    col_map[col] = "Awarded Valuue"
+                elif "spending" in c:
+                    col_map[col] = "Actual Spending"
+                elif "balance" in c:
+                    col_map[col] = "Actual Balance Amount"
+                elif "pending" in c:
+                    col_map[col] = "Pending approval"
+
+            df = df.rename(columns=col_map)
+
+            missing = [c for c in REQUIRED_COLS if c not in df.columns]
+            if missing:
+                st.error(f"Missing columns after cleanup: {missing}")
+                st.write("Detected columns:", list(df.columns))
+                st.stop()
+
+            df = df[REQUIRED_COLS].copy()
+
+            # --- Remove junk / blank rows ---
+            df = df[
+                ~(
+                    (df["Area"].astype(str).str.strip() == "0") |
+                    (df["Area"].isna())
+                )
+            ]
+
+            # 6️⃣ Numeric cleanup
+            for c in REQUIRED_COLS[2:6]:
+                df[c] = clean_currency(df[c])
+
+            money_cols = [
+                "Awarded Valuue",
+                "Actual Spending",
+                "Actual Balance Amount",
+                "Pending approval"
+            ]
+
+            # Remove rows where ALL financial values are zero (now safe because numeric)
+            df = df[~(df[money_cols].sum(axis=1) == 0)]
+
+            # 7️⃣ Display prep
+            df = df.fillna(0)
+
+            # --- REORDER & GROUP FINISHES UNDER STRUCTURE (DISPLAY ONLY) ---
+            df["Area"] = df["Area"].astype(str)
+
+            structure_mask = df["Area"].str.contains("Structure", case=False, na=False)
+            structure_df = df[structure_mask]
+
+            finishes_mask = df["Area"].str.contains(
+                "Ground Floor|GYM|Business|External Development|Façade|Finishes For Tower",
+                case=False,
+                na=False
+            )
+            finishes_df = df[finishes_mask]
+
+            remaining_df = df[~(structure_mask | finishes_mask)]
+
+            finishes_heading = pd.DataFrame([{
+                "S.No": "",
+                "Area": "Finishes",
+                "First Quotation Recived": 0,
+                "Awarded Valuue": 0,
+                "Actual Spending": 0,
+                "Actual Balance Amount": 0,
+                "Pending approval": 0
+            }])
+
+            df = pd.concat(
+                [structure_df, finishes_heading, finishes_df, remaining_df],
+                ignore_index=True
+            )
+
+            # --- ADD TOTAL FINISHES ROW ---
+            fin_mask = df["Area"].str.contains(
+                "Ground Floor|GYM|Business|External Development|Façade|Finishes For Tower",
+                case=False,
+                na=False
+            )
+            fin_df = df[fin_mask]
+
+            if not fin_df.empty:
+                total_finishes = {
+                    "S.No": "",
+                    "Area": "Total Finishes",
+                    "First Quotation Recived": fin_df["First Quotation Recived"].sum(),
+                    "Awarded Valuue": fin_df["Awarded Valuue"].sum(),
+                    "Actual Spending": fin_df["Actual Spending"].sum(),
+                    "Actual Balance Amount": fin_df["Actual Balance Amount"].sum(),
+                    "Pending approval": fin_df["Pending approval"].sum(),
+                }
+
+                last_fin_idx = fin_df.index.max()
+                df = pd.concat(
+                    [df.loc[:last_fin_idx], pd.DataFrame([total_finishes]), df.loc[last_fin_idx + 1:]],
+                    ignore_index=True
+                )
+
+            # --- ADD STRUCTURE + FINISHES ROW ---
+            sf_mask = df["Area"].str.contains("Structure|Total Finishes", case=False, na=False)
+            sf_df = df[sf_mask]
+
+            sf_row = {
+                "S.No": "",
+                "Area": "Structure + Finishes",
+                "First Quotation Recived": sf_df["First Quotation Recived"].sum(),
+                "Awarded Valuue": sf_df["Awarded Valuue"].sum(),
+                "Actual Spending": sf_df["Actual Spending"].sum(),
+                "Actual Balance Amount": sf_df["Actual Balance Amount"].sum(),
+                "Pending approval": sf_df["Pending approval"].sum(),
+            }
+
+            df = pd.concat([df, pd.DataFrame([sf_row])], ignore_index=True)
+
+            # --- FINAL SAFETY: REMOVE ONLY 'Total' ROW (if Excel has it) ---
+            df = df[~df["Area"].astype(str).str.strip().eq("Total")]
+
+            # ================= KPI (Structure + Total Finishes ONLY) =================
+            structure_rows = df[
+                df["Area"].astype(str).str.contains("Structure", case=False, na=False)
+                & ~df["Area"].astype(str).str.strip().eq("Structure + Finishes")
+            ]
+            total_finishes_row = df[df["Area"].astype(str).str.strip().eq("Total Finishes")]
+
+            df_kpi = pd.concat([structure_rows, total_finishes_row], ignore_index=True)
+
+            total_awarded = df_kpi["Awarded Valuue"].sum()
+            actual_spent  = df_kpi["Actual Spending"].sum()
+            balance_amt   = df_kpi["Actual Balance Amount"].sum()
+            pending_amt   = df_kpi["Pending approval"].sum()
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("💼 Total Awarded", f"{total_awarded:,.0f}")
+            c2.metric("💸 Actual Spending", f"{actual_spent:,.0f}")
+            c3.metric("🧮 Balance", f"{balance_amt:,.0f}")
+            c4.metric("⏳ Pending Approvals", f"{pending_amt:,.0f}")
+
+            st.markdown("---")
+
+            # ---------------- DISPLAY (Wide Area Column + No Decimals) ----------------
+            def highlight_groups(row):
+                area = str(row.get("Area", "")).strip()
+                if area == "Finishes":
+                    return ["background-color:#e6e6e6; font-weight:700; font-size:15px;"] * len(row)
+                return [""] * len(row)
+
+            def format_cash(val):
+                try:
+                    val = float(val)
+                except:
+                    return ""
+                return f"{val:,.0f}" if val != 0 else ""
+
+            st.data_editor(
+                df.style
+                  .apply(highlight_groups, axis=1)
+                  .format(
+                      format_cash,
+                      subset=[
+                          "First Quotation Recived",
+                          "Awarded Valuue",
+                          "Actual Spending",
+                          "Actual Balance Amount",
+                          "Pending approval"
+                      ]
+                  ),
+                use_container_width=True,
+                hide_index=True,
+                disabled=True,
+                column_config={
+                    "Area": st.column_config.TextColumn("Area", width="large"),
+                    "S.No": st.column_config.TextColumn("S.No", width="small"),
+                }
+            )
+
+        except Exception as e:
+            st.error(f"Cash Flow error: {e}")
+
+    
+ 
+    # ======================================================
+    # 🏢 I TOWER CASH FLOW
+    # ======================================================
+    with fin_tabs[1]:
+        render_cashflow_for_tower(
+            tower_title="I Tower",
+            summary_sheet="Summary I Tower",
+            finishes_sheet="I Finishes",
+            checkbox_key="i_tower_pending",
+            pdf_filename="I_Tower_Finishes.pdf"
+        )
+    # ======================================================
+    # 🏢 L1 TOWER CASH FLOW
+    # ======================================================
+    with fin_tabs[2]:
+        render_cashflow_for_tower(
+            tower_title="L1 Tower",
+            summary_sheet="Summary L1 Tower",
+            finishes_sheet="L1 Finishes",
+            checkbox_key="l1_tower_pending",
+            pdf_filename="L1_Tower_Finishes.pdf"
+        )
+    # ======================================================
+    # 🏢 L2 TOWER CASH FLOW
+    # ======================================================
+    with fin_tabs[3]:
+        render_cashflow_for_tower(
+            tower_title="L2 Tower",
+            summary_sheet="Summary L2 Tower",
+            finishes_sheet="L2 Finishes",
+            checkbox_key="l2_tower_pending",
+            pdf_filename="L2_Tower_Finishes.pdf"
+        )
+    # ======================================================
+    # 🏢 GF
+    # ======================================================
+    with fin_tabs[4]:
+        render_cashflow_for_tower(
+            tower_title="Ground Floor",
+            summary_sheet="Ground Floor",
+            finishes_sheet=None,
+            checkbox_key=None,
+            pdf_filename="Ground_Floor_Cashflow.pdf",
+            summary_rows=None,
+            show_finishes=False   # ❌ NO finishes
+        )
+    # ======================================================
+    # 🏢 External Development
+    # ======================================================
+    with fin_tabs[5]:  # 🌳 External Development Cash Flow
+
+        render_cashflow_for_tower(
+            tower_title="External Development",
+            summary_sheet="Court Yard",   # ✅ MUST match Excel exactly
+            finishes_sheet=None,
+            checkbox_key="ext_fin_chk",
+            pdf_filename=f"External_Development_Financial_{get_previous_friday()}.pdf",
+            show_finishes=False
+        )
+
+# ================== DOCUMENTATION TAB ==================
+elif view_mode == "📂 Documentation":
+
+    st.header("📂 Documentation Dashboard")
+
+    # 🔗 SharePoint Master Link
+    st.markdown(
+        f"🔗 **SharePoint Project Folder:** "
+        f"<a href='{SHAREPOINT_DOC_URL}' target='_blank'>{SHAREPOINT_DOC_URL}</a>",
+        unsafe_allow_html=True
+    )
+
+    doc_tabs = st.tabs([
+        "🏗 Site Documentation (IR Logs)",
+        "📑 Project Documentation Register"
+    ])
+
+    # ====================================================
+    # TAB 1 — SITE DOCUMENTATION (IR LOGS)
+    # ====================================================
+    with doc_tabs[0]:
+
+        st.subheader("🏗 Site Documentation — Overall IR Status")
+
+        # ------------------------------------------------
+        # 1️⃣ LOAD RAW SHEET (NO HEADER)
+        # ------------------------------------------------
+        try:
+            raw = pd.read_excel(
+                SITE_DOC_FILE,
+                sheet_name=0,
+                header=None
+            )
+        except Exception as e:
+            st.error(f"❌ Could not load IR Logs file: {e}")
+            st.stop()
+
+        # ------------------------------------------------
+        # 2️⃣ DETECT REAL HEADER ROW
+        # ------------------------------------------------
+        header_row = None
+        for i in range(len(raw)):
+            row = raw.iloc[i].astype(str).str.lower()
+            if row.str.contains("sr").any() and row.str.contains("ir status").any():
+                header_row = i
+                break
+
+        if header_row is None:
+            st.error("❌ Could not detect IR table header row")
+            st.stop()
+
+        # ------------------------------------------------
+        # 3️⃣ PROMOTE HEADER
+        # ------------------------------------------------
+        df = raw.iloc[header_row + 1:].copy()
+        df.columns = raw.iloc[header_row]
+
+        df.columns = (
+            df.columns.astype(str)
+            .str.strip()
+            .str.replace("nan", "", regex=False)
+        )
+
+        df = df.dropna(how="all")
+        df = df.loc[:, df.columns != ""]
+
+        # ------------------------------------------------
+        # 4️⃣ CLEAN TOWER COLUMNS
+        # ------------------------------------------------
+        TOWER_COLS = ["I Tower", "L1 Tower", "L2 Tower", "External Development"]
+
+        for col in TOWER_COLS:
+            if col in df.columns:
+                df[col] = (
+                    df[col]
+                    .replace("", 0)
+                    .replace(" ", 0)
+                    .fillna(0)
+                    .astype(float)
+                )
+
+        # ------------------------------------------------
+        # 5️⃣ NORMALIZE IR STATUS
+        # ------------------------------------------------
+        def normalize_ir_status(val):
+            v = str(val).lower()
+            if "fully approved" in v:
+                return "Approved"
+            if "approved with" in v:
+                return "Approved with Comments"
+            if "rejected" in v:
+                return "Rejected"
+            if "open" in v or "pending" in v:
+                return "Open"
+            if "total" in v:
+                return "Total"
+            return None
+
+        df["IR Type"] = df["IR Status"].apply(normalize_ir_status)
+
+        # ------------------------------------------------
+        # 6️⃣ DROP EXCEL TOTAL ROWS
+        # ------------------------------------------------
+        df_ir = df[df["IR Type"] != "Total"].copy()
+
+        # ------------------------------------------------
+        # 7️⃣ SUMMARY FUNCTIONS
+        # ------------------------------------------------
+        def summarize_tower_ir(df, tower_col):
+            return (
+                df.groupby("IR Type")[tower_col]
+                .sum()
+                .reset_index()
+                .rename(columns={tower_col: "Count"})
+            )
+
+        def summarize_all_towers(df, tower_cols):
+            df_all = df.copy()
+            df_all["ALL"] = df_all[tower_cols].sum(axis=1)
+
+            return (
+                df_all.groupby("IR Type")["ALL"]
+                .sum()
+                .reset_index()
+                .rename(columns={"ALL": "Count"})
+            )
+
+        # ------------------------------------------------
+        # 8️⃣ RENDER FUNCTIONS (FIXED)
+        # ------------------------------------------------
+        def render_status_tab(tab, tower_name, tower_col):
+            with tab:
+                summary = summarize_tower_ir(df_ir, tower_col)
+
+                approved = summary.loc[
+                    summary["IR Type"].isin(["Approved", "Approved with Comments"]),
+                    "Count"
+                ].sum()
+
+                pending = summary.loc[
+                    summary["IR Type"] == "Open",
+                    "Count"
+                ].sum()
+
+                rejected = summary.loc[
+                    summary["IR Type"] == "Rejected",
+                    "Count"
+                ].sum()
+
+                total = summary["Count"].sum()
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric(f"Total IRs ({tower_name})", int(total))
+                c2.metric("Approved", int(approved))
+                c3.metric("Pending", int(pending))
+                c4.metric("Rejected", int(rejected))
+
+                st.markdown("---")
+                st.dataframe(summary, use_container_width=True, hide_index=True)
+
+        def render_all_towers_tab(tab):
+            with tab:
+                summary = summarize_all_towers(
+                    df_ir,
+                    ["I Tower", "L1 Tower", "L2 Tower", "External Development"]
+                )
+
+                approved = summary.loc[
+                    summary["IR Type"].isin(["Approved", "Approved with Comments"]),
+                    "Count"
+                ].sum()
+
+                pending = summary.loc[
+                    summary["IR Type"] == "Open",
+                    "Count"
+                ].sum()
+
+                rejected = summary.loc[
+                    summary["IR Type"] == "Rejected",
+                    "Count"
+                ].sum()
+
+                total = summary["Count"].sum()
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Total IRs (All Towers)", int(total))
+                c2.metric("Approved", int(approved))
+                c3.metric("Pending", int(pending))
+                c4.metric("Rejected", int(rejected))
+
+                st.markdown("---")
+                st.dataframe(summary, use_container_width=True, hide_index=True)
+
+        # ------------------------------------------------
+        # 9️⃣ TABS & RENDER
+        # ------------------------------------------------
+        site_tabs = st.tabs([
+            "🏢 All Towers",
+            "🏢 I Tower",
+            "🏢 L1 Tower",
+            "🏢 L2 Tower",
+            "🌳 External Development"
+        ])
+
+        render_all_towers_tab(site_tabs[0])
+        render_status_tab(site_tabs[1], "I Tower", "I Tower")
+        render_status_tab(site_tabs[2], "L1 Tower", "L1 Tower")
+        render_status_tab(site_tabs[3], "L2 Tower", "L2 Tower")
+        render_status_tab(site_tabs[4], "External Development", "External Development")
+
+    # ====================================================
+    # TAB 2 — PROJECT DOCUMENTATION REGISTER
+    # ====================================================
+    with doc_tabs[1]:
+
+        st.subheader("📑 Project Documentation Register")
+
+        try:
+            df_proj = pd.read_excel(PROJECT_DOC_FILE)
+            df_proj.columns = df_proj.columns.astype(str).str.strip()
+        except Exception as e:
+            st.error(f"❌ Could not load Project Documentation Register: {e}")
+            st.stop()
+
+        def guess_status_col(cols):
+            for c in cols:
+                if "status" in c.lower():
+                    return c
+            return None
+
+        status_col = guess_status_col(df_proj.columns)
+        if status_col:
+            df_proj[status_col] = df_proj[status_col].astype(str).str.title()
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Documents", len(df_proj))
+
+        if status_col:
+            c2.metric("Open", int((df_proj[status_col] == "Open").sum()))
+            c3.metric("Closed", int((df_proj[status_col] == "Closed").sum()))
+        else:
+            c2.metric("Open", "-")
+            c3.metric("Closed", "-")
+
+        st.markdown("---")
+        st.dataframe(df_proj, use_container_width=True, hide_index=True)
+
+
+
+
+
