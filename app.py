@@ -43,7 +43,7 @@ UNISON_LOGO   = os.path.join(BASE_DIR, "assets", "unison_logo.png")
 
 # ================== FILE PATHS ==================
 EXCEL_FILE = "Apartment_Progress_Weighted-Progress_App_ITowerAvg_AppView_v5.xlsx"
-CASHFLOW_FILE = "2111-UNI-LCRG-Projected Cash Flow 14.12.2025 -.xlsx"
+CASHFLOW_FILE = "2111-UNI-LCRG-Projected Cash Flow 29.12.2025 -.xlsx"
 CASHFLOW_SHEET = 0
 
 # ================== DOCUMENTATION FILES ==================
@@ -129,7 +129,7 @@ render_global_header()
 # --------------------------- CONSTANTS -----------------------------
 EXCEL_FILE = "Apartment_Progress_Weighted-Progress_App_ITowerAvg_AppView_v5.xlsx"
 # ---------------- CASH FLOW CONFIG ----------------
-CASHFLOW_FILE = "2111-UNI-LCRG-Projected Cash Flow 14.12.2025 -.xlsx"
+CASHFLOW_FILE = "2111-UNI-LCRG-Projected Cash Flow 29.12.2025 -.xlsx"
 CASHFLOW_SHEET = 0   # use 0 for first sheet (safe)
 
 
@@ -205,31 +205,39 @@ def make_photo_key(tower, apt):
     return f"{prefix}-{apt_str}"
 
 def ensure_apt_folder_from_zip(key):
-    apt_dir = os.path.join(PHOTO_DIR, key)
-    if os.path.isdir(apt_dir):
-        existing = [f for f in os.listdir(apt_dir)
-                    if f.lower().endswith((".jpg", ".jpeg", ".png"))]
-        if existing:
-            return apt_dir
+    apt_dir = os.path.join(PHOTO_DIR, "Apartment", key)
+    os.makedirs(apt_dir, exist_ok=True)
 
-    for fname in os.listdir(PHOTO_DIR):
-        if fname.lower().endswith(".zip") and fname.startswith(key):
-            try:
-                with zipfile.ZipFile(os.path.join(PHOTO_DIR, fname), "r") as zf:
-                    os.makedirs(apt_dir, exist_ok=True)
-                    for member in zf.namelist():
-                        if member.lower().endswith((".jpg", ".jpeg", ".png")):
-                            with zf.open(member) as imgf:
-                                try:
-                                    img = Image.open(imgf)
-                                    img.load()
-                                except:
-                                    continue
-                                img.save(os.path.join(apt_dir, os.path.basename(member)))
-            except:
-                pass
-            break
+    # If photos already extracted, return
+    existing = [
+        f for f in os.listdir(apt_dir)
+        if f.lower().endswith((".jpg", ".jpeg", ".png"))
+    ]
+    if existing:
+        return apt_dir
+
+    # ZIP is stored here 👇 (CONFIRMED PATH)
+    zip_path = os.path.join(PHOTO_DIR, "Apartment", f"{key}.zip")
+
+    if os.path.exists(zip_path):
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for m in zf.namelist():
+                    if m.lower().endswith((".jpg", ".jpeg", ".png")):
+                        with zf.open(m) as imgf:
+                            img = Image.open(imgf)
+                            img.load()
+                            img.save(
+                                os.path.join(
+                                    apt_dir,
+                                    os.path.basename(m)
+                                )
+                            )
+        except Exception as e:
+            print(f"ZIP error for {key}: {e}")
+
     return apt_dir
+
 
 def clean_currency(col):
     if not isinstance(col, pd.Series):
